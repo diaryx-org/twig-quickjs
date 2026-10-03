@@ -1,0 +1,25 @@
+# Café ☕ and 😀 *straße*
+
+Ein Absatz mit _Ümlauten_ und einem Emoji am Ende 😀
+und [Verknüpfung 🔗](https://例え.jp) und `vérbatim 😀`.
+
+> Zitat — mit Gedankenstrich -- und "Anführung" ... 😀
+> zweite Zeile ✓
+
+- Punkt ①
+- Punkt ② with :smile: and $`x² + y²`$
+
+| Spalte ä | Spalte 😀 |
+|---------:|:---------|
+| ö        | 🎉        |
+
+Fußnote[^ü] und ein Wort{.klasse #ïd}.
+
+[^ü]: Die Fußnote ✓.
+
+{lang=français}
+Paragraf mit attribut.
+
+``` ruby
+puts "héllo 😀"
+```

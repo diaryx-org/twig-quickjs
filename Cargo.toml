@@ -1,0 +1,61 @@
+[package]
+name = "twig-quickjs"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A twig document format written in JavaScript: a helper the twig CLI spawns, and a Language the twig crate registers, over an ES module that parses the format, run on QuickJS."
+readme = "README.md"
+documentation = "https://docs.rs/twig-quickjs"
+keywords = ["twig", "djot", "javascript", "quickjs", "parser"]
+categories = ["parser-implementations", "text-processing", "command-line-utilities"]
+publish = true
+
+# `xtask` is twig-quickjs's CI, as a program, as it is in fig-quickjs: `cargo
+# xtask <job>` runs one CI job and the workflow runs nothing else.
+[workspace]
+members = ["xtask"]
+
+# One `version = "…"` line for the whole repository, which is what `dx bump`
+# rewrites and what the package inherits.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# Minimum supported Rust version, enforced by the `msrv` CI job, which reads
+# this value. fig-quickjs's floor, which rquickjs 0.13 (1.87) and twig-doc
+# (1.85) are both under.
+rust-version = "1.88"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/diaryx-org/twig-quickjs"
+
+# The helper executable: `twig-quickjs <module.mjs>` serves the module's format
+# to a `twig` binary over stdin and stdout. No feature flag — a `cargo install
+# twig-quickjs` is a working helper.
+[[bin]]
+name = "twig-quickjs"
+path = "src/main.rs"
+
+[dependencies]
+# The contract this crate implements: `twig::language::Language` is what a
+# module becomes, `register` is how a Rust program takes one in, and `serve`
+# is the helper's whole loop — the wire's codec is the library's own, so this
+# crate moves lines and parses no JSON. Published as `twig-doc`; the library
+# is `twig`. It links twig's prebuilt core, so `cargo install twig-quickjs`
+# needs no Zig toolchain, and it carries the compiled djot the tests hold the
+# twin to.
+twig = { package = "twig-doc", version = "4" }
+# QuickJS-ng, vendored: the engine is built into the binary, so a helper is
+# one file with no runtime to install beside it. `loader` for the module
+# resolver that serves `twig`, `twig/wire`, the languages and djot.js from the
+# binary; `array-buffer` for the `Uint8Array` a `TextEncoder` answers.
+rquickjs = { version = "0.13", features = ["loader", "array-buffer"] }
+
+# No dev-dependencies: the tests hold the djot twin to the compiled djot
+# in-process, which the default `twig-doc` carries.
+
+[profile.release]
+# A helper is spawned per `twig` invocation; its size and start-up are what
+# a user feels.
+lto = true
+codegen-units = 1
