@@ -59,3 +59,10 @@ rquickjs = { version = "0.13", features = ["loader", "array-buffer"] }
 # a user feels.
 lto = true
 codegen-units = 1
+
+# QuickJS itself, optimized in a debug build too: the tests run djot.js
+# through it thousands of times — twig's load check drives every gesture
+# over every sample of an authoring language — and an unoptimized
+# interpreter makes that minutes of a test suite instead of seconds.
+[profile.dev.package.rquickjs-sys]
+opt-level = 3
