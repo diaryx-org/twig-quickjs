@@ -35,10 +35,11 @@
 // module also reads djot.js's event stream (`parseEvents`), the same events
 // `parse` builds its AST from, for those and nothing else.
 //
-// Read tier: no `print`. docs/twin-differences.md lists where djot.js and
-// twig's djot disagree.
+// It reads and writes: `print` rebuilds the djot.js AST a table is and
+// prints it with djot.js's `renderDjot` (below). It does not author.
+// docs/twin-differences.md lists where djot.js and twig's djot disagree.
 
-import { parse as parseDjot, parseEvents } from "@djot/djot";
+import { parse as parseDjot, parseEvents, renderDjot } from "@djot/djot";
 import { offsets, table } from "twig";
 
 /** twig's djot harness samples (`src/languages/djot/djot.zig`), verbatim. */
@@ -56,10 +57,13 @@ const SAMPLES = [
 export default {
   name: "djot",
   extensions: ["dj", "djot"],
-  caps: { read: true, write: false, author: false },
+  caps: { read: true, write: true, author: false },
   samples: SAMPLES,
   parse(_call, input) {
     return djotTable(input);
+  },
+  print(_call, t) {
+    return renderDjot(djotAst(t));
   },
 };
 
@@ -622,4 +626,204 @@ function stringContent(node) {
   if (node.tag === "soft_break" || node.tag === "hard_break") return "\n";
   if (node.children) return node.children.map(stringContent).join("");
   return "";
+}
+
+// ── printing ──────────────────────────────────────────────────────────────
+// A table without positions back to djot: the djot.js AST its rows are,
+// printed by djot.js's own `renderDjot`. The table may come from another
+// format (`twig convert -o js-djot`), so a kind djot has no spelling for is
+// degraded rather than refused — its children kept where it had any, its
+// text where it had that — and twig's fidelity probe measures what that
+// costs, as it does for every target.
+//
+// renderDjot is djot.js's pretty-printer, and prints as djot.js 0.3.2 does:
+// a run of spaces in text as one, a task list's bullet as `-`, a thematic
+// break as `* * * * *`, attributes on a line of their own above a block, and
+// an escaped character in text so that it reparses as a `str` of its own.
+// It has no spelling for a hard break, which goes through as a literal
+// backslash and a line end; and it fences every div with `:::`, so a div
+// inside a div is refused rather than written so that it closes its parent.
+
+const INLINE_LEAVES = new Set(["verbatim", "inline_math", "display_math", "url", "email"]);
+
+/** djot.js's base identifier for a heading's text (`getUniqueIdentifier`). */
+function baseIdentifier(text) {
+  return text.replace(/[\][~!@#$%^&*(){}`,.<>\\|=+/?\s]+/g, " ").trim().replace(/ +/g, "-");
+}
+
+function attributesOf(row) {
+  if (!row.attrs || row.attrs.length === 0) return undefined;
+  const out = {};
+  for (const { key, value } of row.attrs) {
+    const v = value ?? "";
+    out[key] = key === "class" && out.class ? `${out.class} ${v}` : v;
+  }
+  return out;
+}
+
+/** The djot.js document a node table (with or without positions) is. */
+export function djotAst(t) {
+  const rows = t.nodes;
+  const kids = rows.map(() => []);
+  const tops = [];
+  rows.forEach((r, i) => {
+    if (r.parent === null || r.parent === undefined) tops.push(i);
+    else kids[r.parent].push(i);
+  });
+  const [root, ...definitions] = tops;
+  const references = {};
+  const footnotes = {};
+  // Headings' implicit references, which a reparse makes again: by label,
+  // the destination each would have.
+  const implicit = new Map();
+  let insideDiv = 0;
+
+  const children = (i, inline) => kids[i].flatMap((k) => node(k, inline));
+  // A section's or a heading's attributes, less an identifier djot derives
+  // from the heading's text by itself — which the reparse derives again —
+  // and the reference that identifier defines, noted so it is not written.
+  const identified = (n, attributes, heading) => {
+    const id = attributes?.id;
+    if (id === undefined) {
+      if (attributes) n.attributes = attributes;
+      return n;
+    }
+    const text = stringContent(heading).trim();
+    implicit.set(normalizeLabel(text), "#" + id);
+    if (id === baseIdentifier(text)) {
+      const { id: _, ...rest } = attributes;
+      if (Object.keys(rest).length) n.attributes = rest;
+    } else {
+      n.attributes = attributes;
+    }
+    return n;
+  };
+  function node(i, inline) {
+    const r = rows[i];
+    const attributes = attributesOf(r);
+    const withAttrs = (n) => {
+      if (attributes) n.attributes = attributes;
+      return n;
+    };
+    switch (r.kind) {
+      case "doc":
+        return children(i, false);
+      case "section": {
+        const n = { tag: "section", children: children(i, false) };
+        const h = n.children.find((c) => c.tag === "heading");
+        return [h ? identified(n, attributes, h) : withAttrs(n)];
+      }
+      case "heading": {
+        const n = { tag: "heading", level: r.level ?? 1, children: children(i, true) };
+        return [identified(n, attributes, n)];
+      }
+      case "para":
+      case "block_quote":
+      case "caption":
+      case "term":
+      case "definition":
+      case "list_item":
+      case "definition_list_item":
+      case "table":
+        return [withAttrs({ tag: r.kind, children: children(i, r.kind === "para" || r.kind === "caption" || r.kind === "term") })];
+      case "thematic_break":
+        return [withAttrs({ tag: "thematic_break" })];
+      case "code_block":
+        return [withAttrs({ tag: "code_block", lang: r.lang ?? undefined, text: r.text ?? "" })];
+      case "raw_block":
+        return [withAttrs({ tag: "raw_block", format: r.format, text: r.text ?? "" })];
+      case "metadata":
+        return [{ tag: "code_block", lang: r.lang || undefined, text: r.text ?? "" }];
+      case "bullet_list":
+        return [withAttrs({ tag: "bullet_list", style: { plus: "+", star: "*" }[r.spelling?.bullet] ?? "-", tight: r.tight !== false, children: children(i, false) })];
+      case "ordered_list": {
+        const digit = { decimal: "1", lower_alpha: "a", upper_alpha: "A", lower_roman: "i", upper_roman: "I" }[r.numbering] ?? "1";
+        const delim = r.spelling?.ordered_delim;
+        const style = delim === "paren_both" ? `(${digit})` : delim === "paren_after" ? `${digit})` : `${digit}.`;
+        return [withAttrs({ tag: "ordered_list", style, start: r.start ?? 1, tight: r.tight !== false, children: children(i, false) })];
+      }
+      case "task_list":
+        return [withAttrs({ tag: "task_list", tight: r.tight !== false, children: children(i, false) })];
+      case "task_list_item":
+        return [withAttrs({ tag: "task_list_item", checkbox: r.checked ? "checked" : "unchecked", children: children(i, false) })];
+      case "definition_list":
+        return [withAttrs({ tag: "definition_list", children: children(i, false) })];
+      case "row":
+        return [withAttrs({ tag: "row", head: !!r.head, children: children(i, false) })];
+      case "cell":
+        return [withAttrs({ tag: "cell", head: !!r.head, align: r.alignment ?? "default", children: children(i, true) })];
+      case "container": {
+        const cls = r.name ? { class: r.name } : undefined;
+        const merged = cls || attributes ? { ...(cls ?? {}), ...(attributes ?? {}) } : undefined;
+        if (cls && attributes?.class) merged.class = `${r.name} ${attributes.class}`;
+        if (!inline && insideDiv) {
+          // renderDjot fences every div with `:::`, so a div inside another
+          // would close it; refused rather than written wrong.
+          throw new Error("djot.js prints a div inside a div with its parent's fence, which closes the parent; this document cannot be written as djot here");
+        }
+        insideDiv += inline ? 0 : 1;
+        const n = inline
+          ? { tag: "span", children: children(i, true) }
+          : { tag: "div", children: children(i, false) };
+        insideDiv -= inline ? 0 : 1;
+        if (merged) n.attributes = merged;
+        return [n];
+      }
+      case "footnote":
+        footnotes[r.label] = withAttrs({ tag: "footnote", label: r.label, children: children(i, false) });
+        return [];
+      case "reference":
+        references[r.label] = withAttrs({ tag: "reference", label: r.label, destination: r.destination ?? "" });
+        return [];
+      case "str":
+        return [withAttrs({ tag: "str", text: r.text ?? "" })];
+      case "soft_break":
+        return [{ tag: "soft_break" }];
+      // djot.js prints no hard break; its backslash goes through as a
+      // literal (smart punctuation is printed verbatim), then a newline.
+      case "hard_break":
+        return [{ tag: "smart_punctuation", type: "literal", text: "\\" }, { tag: "soft_break" }];
+      case "non_breaking_space":
+        return [{ tag: "non_breaking_space" }];
+      case "smart_punctuation":
+        return [{ tag: "smart_punctuation", type: r.punctuation_kind, text: r.text }];
+      case "emph": case "strong": case "mark": case "superscript": case "subscript":
+      case "delete": case "insert": case "double_quoted": case "single_quoted":
+        return [withAttrs({ tag: r.kind, children: children(i, true) })];
+      case "link":
+      case "image": {
+        const n = { tag: r.kind, children: children(i, true) };
+        if (r.reference !== null && r.reference !== undefined) n.reference = r.reference;
+        else n.destination = r.destination ?? "";
+        return [withAttrs(n)];
+      }
+      case "raw_inline":
+        return [withAttrs({ tag: "raw_inline", format: r.format, text: r.text ?? "" })];
+      case "symb":
+        return [withAttrs({ tag: "symb", alias: r.text ?? "" })];
+      case "footnote_reference":
+        return [{ tag: "footnote_reference", text: r.text ?? "" }];
+      default:
+        if (INLINE_LEAVES.has(r.kind)) return [withAttrs({ tag: r.kind, text: r.text ?? "" })];
+        // A kind djot has no spelling for: its children where it has any,
+        // its text where it has that, and nothing otherwise.
+        if (kids[i].length) return children(i, inline);
+        if (typeof r.text === "string" && r.text !== "") {
+          const str = { tag: "str", text: r.text };
+          return inline ? [str] : [{ tag: "para", children: [str] }];
+        }
+        return [];
+    }
+  }
+
+  const rootRow = rows[root];
+  const doc = { tag: "doc", references, autoReferences: {}, footnotes, children: [] };
+  if (rootRow && rootRow.kind === "doc") doc.children = node(root, false);
+  else if (rootRow) doc.children = node(root, false);
+  for (const d of definitions) node(d, false);
+  // A reference a heading defines, the reparse defines again.
+  for (const [label, r] of Object.entries(references)) {
+    if (implicit.get(label) === r.destination && !r.attributes) delete references[label];
+  }
+  return doc;
 }

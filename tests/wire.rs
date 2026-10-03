@@ -43,7 +43,8 @@ fn the_helper_answers_the_wire() {
         &[
             r#"{"op":"describe"}"#,
             r#"{"op":"parse","dialect":"js-djot","features":[],"input":"Hi *x* é\n"}"#,
-            r#"{"op":"print","dialect":"js-djot","features":[],"table":{"nodes":[{"kind":"doc"}]}}"#,
+            r#"{"op":"print","dialect":"js-djot","features":[],"table":{"nodes":[{"kind":"doc"},{"kind":"para","parent":0},{"kind":"emph","parent":1},{"kind":"str","parent":2,"text":"hi"}]}}"#,
+            r#"{"op":"render","dialect":"js-djot","features":[],"which":"render_text","text":"*","position":"inline_text"}"#,
             "not json",
         ],
     );
@@ -55,7 +56,7 @@ fn the_helper_answers_the_wire() {
         answers[0]
     );
     assert!(
-        answers[0].contains(r#""caps":{"read":true,"write":false,"author":false}"#),
+        answers[0].contains(r#""caps":{"read":true,"write":true,"author":false}"#),
         "{}",
         answers[0]
     );
@@ -63,16 +64,14 @@ fn the_helper_answers_the_wire() {
         answers[1],
         r#"{"ok":true,"table":{"nodes":[{"kind":"doc","parent":null,"span":[0,10],"content_span":[0,10]},{"kind":"para","parent":0,"span":[0,10],"content_span":[0,9]},{"kind":"str","parent":1,"span":[0,3],"text":"Hi "},{"kind":"strong","parent":1,"span":[3,6],"content_span":[4,5]},{"kind":"str","parent":3,"span":[4,5],"text":"x"},{"kind":"str","parent":1,"span":[6,9],"text":" é"}],"labels":[]}}"#
     );
-    assert!(
-        answers[2].starts_with(r#"{"ok":false,"message":"#),
-        "{}",
-        answers[2]
-    );
-    assert!(
-        answers[3].starts_with(r#"{"ok":false,"message":"#),
-        "{}",
-        answers[3]
-    );
+    assert_eq!(answers[2], r#"{"ok":true,"output":"_hi_\n"}"#);
+    // It does not author: no renderer answers.
+    for refused in &answers[3..] {
+        assert!(
+            refused.starts_with(r#"{"ok":false,"message":"#),
+            "{refused}"
+        );
+    }
 }
 
 #[test]
@@ -95,7 +94,7 @@ fn check_registers_and_reports() {
     assert!(out.status.success());
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
-        "js-djot: registered (read); 8 sample(s) parsed\n"
+        "js-djot: registered (read write); 8 sample(s) parsed, printed and reparsed to the same tree\n"
     );
 
     // Under its own name it is refused: twig compiles djot in.

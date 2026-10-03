@@ -45,7 +45,7 @@ js-djot  dj-js  twig-quickjs --prefix js- djot
 
 ```bash
 $ twig lang check js-djot --against djot djot-js-readme.dj unicode.dj
-js-djot: registered (read); every sample parsed
+js-djot: registered (read write); every sample parsed, printed and reparsed to the same tree; fidelity measured
 sample 0: same table as `djot` (5 rows)
 …
 sample 7: same table as `djot` (5 rows)
@@ -67,7 +67,17 @@ units, where twig ends a block (at the last line that carried content, so a
 blank line between blocks belongs to neither), the interior an editor splices
 (`content_span`), the marker a rich view hides (`marker_span`), a list's
 spelling, and where a node's `{…}` was written (`attrs_span`), the last few
-read from djot.js's event stream. It reads; it does not print.
+read from djot.js's event stream.
+
+It writes, too: a table — of a djot document, or of one converted from
+Markdown or HTML (`twig convert -o js-djot`) — is rebuilt as the djot.js AST
+it is and printed by djot.js's own `renderDjot`, and twig reparses every
+sample's print to the same tree before it accepts the language. renderDjot
+prints as djot.js 0.3.2 does — a run of spaces as one, a task list's bullet as
+`-`, an escaped character so that it reads back as a `str` of its own — and has
+no spelling for a hard break, which goes through as a backslash and a line
+end. It fences every div with `:::`, so a div inside a div is refused rather
+than printed so that it closes its parent. It does not author.
 
 ## Install
 

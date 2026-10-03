@@ -293,11 +293,83 @@ fn the_twin_is_a_format_like_any_other() {
     let last = doc.nodes().unwrap().pop().unwrap();
     assert_eq!(last.span, 13..18);
     assert_eq!(last.text.as_deref(), Some(" 😀"));
-    // It reads and does not write.
-    assert!(doc.serialize_to(Target::from(f)).is_err());
+    // It writes, through djot.js's printer.
+    assert_eq!(
+        doc.serialize_to(Target::from(f)).unwrap(),
+        "Hello *world* 😀\n".as_bytes()
+    );
     // Its refusal of bytes that are not text is a parse error, not a crash.
     assert!(Document::parse(b"a\xffb\n", f).is_err());
     // An explicit id is a node of its own, found by its attributes.
     let mut doc = Document::parse_str("{#x}\npara\n", f).unwrap();
     assert_eq!(doc.attrs_span(NodeId(1)).unwrap(), Some(0..4));
+}
+
+/// A document's tree without its positions: what a print must keep.
+fn tree(input: &[u8], format: Format) -> Vec<String> {
+    let mut doc = Document::parse(input, format).unwrap();
+    doc.nodes()
+        .unwrap()
+        .into_iter()
+        .map(|n| {
+            format!(
+                "{:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?} {:?}",
+                n.parent,
+                n.kind,
+                n.text,
+                n.destination,
+                n.level,
+                n.attrs,
+                n.checked,
+                n.head,
+                n.alignment
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn the_twin_prints_through_djot_js() {
+    let f = js_djot();
+    let lang = JsLanguage::builtin("djot").unwrap();
+    let mut documents: Vec<Vec<u8>> = lang
+        .description()
+        .samples
+        .iter()
+        .map(|s| s.clone().into_bytes())
+        .collect();
+    documents.push(
+        std::fs::read(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/documents/crlf.dj"))
+            .unwrap(),
+    );
+    for input in documents {
+        let printed = Document::parse(&input, f)
+            .unwrap()
+            .serialize_to(Target::from(f))
+            .unwrap();
+        // The print reads back as the same tree, by either djot.
+        assert_eq!(
+            tree(&printed, f),
+            tree(&input, f),
+            "{}",
+            String::from_utf8_lossy(&printed)
+        );
+        assert_eq!(tree(&printed, Format::Djot), tree(&input, Format::Djot));
+    }
+}
+
+#[test]
+fn another_format_converts_into_the_twin() {
+    let f = js_djot();
+    let md = "# Title\n\nSome *em* and **strong** text  \nhard break.\n\n- [ ] task\n- [x] done\n\n| a | b |\n|---|--:|\n| 1 | 2 |\n";
+    let mut doc = Document::parse_str(md, Format::Markdown).unwrap();
+    let printed = String::from_utf8(doc.serialize_to(Target::from(f)).unwrap()).unwrap();
+    assert_eq!(
+        printed,
+        "# Title\n\nSome _em_ and *strong* text\\\nhard break.\n\n- [ ] task\n- [X] done\n\n|a|b|\n|---|--:|\n|1|2|\n"
+    );
+    // A div inside a div is refused: djot.js would print it so that it
+    // closes its parent.
+    let mut nested = Document::parse_str("::: a\n:::: b\nx\n::::\n:::\n", Format::Djot).unwrap();
+    assert!(nested.serialize_to(Target::from(f)).is_err());
 }
