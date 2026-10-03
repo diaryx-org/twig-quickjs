@@ -3,8 +3,8 @@
 //! twig's own djot harness samples, which the module declares as its
 //! samples; djot.js's test corpus (`tests/corpus/*.test`, the input of each
 //! case); and the documents in `tests/documents/`, which reach what the
-//! corpus does not — multi-byte text, `\r\n` line ends, a document of some
-//! length.
+//! corpus does not — multi-byte text, `\r\n` line ends, and a document of
+//! some length, djot.js's `bench/readme.dj` (MIT, as the corpus is).
 //!
 //! The twin is registered as `js-djot`, each document is parsed through it
 //! and through `Format::Djot`, and the two documents are compared column by
