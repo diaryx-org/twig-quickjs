@@ -45,7 +45,7 @@ js-djot  dj-js  twig-quickjs --prefix js- djot
 
 ```bash
 $ twig lang check js-djot --against djot djot-js-readme.dj unicode.dj
-js-djot: registered (read write); every sample parsed, printed and reparsed to the same tree; fidelity measured
+js-djot: registered (read write author); every sample parsed, printed and reparsed to the same tree; every gesture kept its promise; fidelity measured
 sample 0: same table as `djot` (5 rows)
 …
 sample 7: same table as `djot` (5 rows)
@@ -77,7 +77,18 @@ prints as djot.js 0.3.2 does — a run of spaces as one, a task list's bullet as
 `-`, an escaped character so that it reads back as a `str` of its own — and has
 no spelling for a hard break, which goes through as a backslash and a line
 end. It fences every div with `:::`, so a div inside a div is refused rather
-than printed so that it closes its parent. It does not author.
+than printed so that it closes its parent.
+
+And it authors: an editor over `js-djot` writes with the compiled djot's
+syntax table — the spellings `twig lang syntax djot` prints, but for a ticked
+task's box, which renderDjot writes `[X]` — and spells a fragment, a heading or
+a quote or a link a gesture builds, by printing it as a document is printed.
+The gestures write what they write over the compiled djot (`tests/twins.rs`
+holds a toolbar's worth to the same bytes). The price is at registration:
+twig's load check drives every gesture over every sample through the module,
+some thousands of calls, which is about two seconds in a release build — paid
+by every `twig` command that loads the helper, and once by a program that
+registers it.
 
 ## Install
 

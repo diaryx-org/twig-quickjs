@@ -135,9 +135,11 @@ pub mod module {
     //! djot read by djot.js (`@djot/djot` 0.3.2, vendored in `js/djot/` by
     //! `scripts/vendor-djot.sh`), its AST mapped onto the table the compiled
     //! djot produces; it writes by printing the djot.js AST a table is with
-    //! djot.js's `renderDjot`. It is the twin twig's runtime-language
-    //! contract was proven against, and `docs/twin-differences.md` lists the
-    //! documents where djot.js and twig's djot disagree.
+    //! djot.js's `renderDjot`, and authors with the compiled djot's syntax
+    //! table, its fragments printed the same way. It is the twin twig's
+    //! runtime-language contract was proven against, and
+    //! `docs/twin-differences.md` lists the documents where djot.js and
+    //! twig's djot disagree.
 }
 
 /// A format whose parser is an ES module.

@@ -26,7 +26,9 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
-use twig::{Document, Format, NodeId, Target};
+use twig::{
+    BlockContainerKind, BlockKind, Document, Editor, Error, Format, InlineKind, NodeId, Target,
+};
 use twig_quickjs::JsLanguage;
 
 /// Corpus cases, by `file:line` of the fence that opens them, whose tables
@@ -372,4 +374,86 @@ fn another_format_converts_into_the_twin() {
     // closes its parent.
     let mut nested = Document::parse_str("::: a\n:::: b\nx\n::::\n:::\n", Format::Djot).unwrap();
     assert!(nested.serialize_to(Target::from(f)).is_err());
+}
+
+/// One gesture on a document, through an editor over `format`: the source
+/// it leaves, or the refusal.
+fn gesture(
+    format: Format,
+    input: &str,
+    g: &dyn Fn(&mut Editor) -> Result<(), Error>,
+) -> Result<String, Error> {
+    let mut editor = Editor::new(input.as_bytes(), format)?;
+    g(&mut editor)?;
+    Ok(String::from_utf8(editor.source()?).unwrap())
+}
+
+#[test]
+fn the_twin_authors_as_the_compiled_djot_does() {
+    let f = js_djot();
+    let doc = "Some words here.\n\n- [ ] a task\n- [x] done\n\nA closing line.\n";
+    type Gesture = (&'static str, Box<dyn Fn(&mut Editor) -> Result<(), Error>>);
+    let gestures: Vec<Gesture> = vec![
+        (
+            "strong",
+            Box::new(|e| e.toggle_inline(5, 10, InlineKind::Strong).map(drop)),
+        ),
+        (
+            "verbatim",
+            Box::new(|e| e.toggle_inline(0, 4, InlineKind::Verbatim).map(drop)),
+        ),
+        (
+            "heading",
+            Box::new(|e| e.set_block(2, BlockKind::Heading(2)).map(drop)),
+        ),
+        (
+            "quote",
+            Box::new(|e| {
+                e.toggle_block_container(0, 17, BlockContainerKind::BlockQuote)
+                    .map(drop)
+            }),
+        ),
+        (
+            "list",
+            Box::new(|e| {
+                e.toggle_block_container(43, 58, BlockContainerKind::OrderedList)
+                    .map(drop)
+            }),
+        ),
+        (
+            "link",
+            Box::new(|e| e.insert_link(5, 10, "https://example.com").map(drop)),
+        ),
+        (
+            "literal",
+            Box::new(|e| e.insert_literal(0, "*not* _emphasis_ ").map(drop)),
+        ),
+        (
+            "attributes",
+            Box::new(|e| {
+                e.set_block_attrs(43, &[("id", Some("end")), ("class", Some("x"))])
+                    .map(drop)
+            }),
+        ),
+        (
+            "unticked",
+            Box::new(|e| e.toggle_task_checked(33).map(drop)),
+        ),
+    ];
+    for (name, g) in &gestures {
+        let mine = gesture(f, doc, g.as_ref());
+        let theirs = gesture(Format::Djot, doc, g.as_ref());
+        assert_eq!(mine, theirs, "{name}");
+        assert!(mine.is_ok(), "{name}: {mine:?}");
+    }
+    // A box the twin ticks is written as djot.js prints one, `[X]`, and
+    // toggled twice it is the box it was.
+    let ticked = gesture(f, doc, &|e| e.toggle_task_checked(20).map(drop)).unwrap();
+    assert!(ticked.contains("- [X] a task"), "{ticked}");
+    let twice = gesture(f, doc, &|e| {
+        e.toggle_task_checked(20)?;
+        e.toggle_task_checked(20).map(drop)
+    })
+    .unwrap();
+    assert_eq!(twice, doc);
 }

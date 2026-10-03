@@ -35,8 +35,9 @@
 // module also reads djot.js's event stream (`parseEvents`), the same events
 // `parse` builds its AST from, for those and nothing else.
 //
-// It reads and writes: `print` rebuilds the djot.js AST a table is and
-// prints it with djot.js's `renderDjot` (below). It does not author.
+// It reads, writes and authors: `print` rebuilds the djot.js AST a table is
+// and prints it with djot.js's `renderDjot` (below), and the editor writes
+// with the compiled djot's syntax table, its fragments printed the same way.
 // docs/twin-differences.md lists where djot.js and twig's djot disagree.
 
 import { parse as parseDjot, parseEvents, renderDjot } from "@djot/djot";
@@ -54,16 +55,177 @@ const SAMPLES = [
   "A paragraph that runs\nover two lines.\n",
 ];
 
+/**
+ * The table an editor's gestures write with: the compiled djot's, as `twig
+ * lang syntax djot` prints it (twig 4.0.0), but for a checked task's box,
+ * which renderDjot writes `[X]` — so a box toggled twice is the box it was.
+ * It names two renderers: `render_block`, a fragment printed as `print`
+ * prints a document, and `spells_autolink`, which asks djot.js.
+ */
+const SYNTAX = {
+  inline_delims: {
+    emph: {
+      open: "_",
+      close: "_",
+    },
+    strong: {
+      open: "*",
+      close: "*",
+    },
+    mark: {
+      open: "{=",
+      close: "=}",
+    },
+    superscript: {
+      open: "^",
+      close: "^",
+    },
+    subscript: {
+      open: "~",
+      close: "~",
+    },
+    insert: {
+      open: "{+",
+      close: "+}",
+    },
+    delete: {
+      open: "{-",
+      close: "-}",
+    },
+    double_quoted: {
+      open: "\"",
+      close: "\"",
+      authorable: false,
+    },
+    single_quoted: {
+      open: "'",
+      close: "'",
+      authorable: false,
+    },
+  },
+  text_leaf_delims: {
+    symb: {
+      open: ":",
+      close: ":",
+      authorable: false,
+    },
+    verbatim: {
+      open: "`",
+      close: "`",
+    },
+    inline_math: {
+      open: "$`",
+      close: "`",
+    },
+    display_math: {
+      open: "$$`",
+      close: "`",
+    },
+    url: {
+      open: "<",
+      close: ">",
+      authorable: false,
+    },
+    email: {
+      open: "<",
+      close: ">",
+      authorable: false,
+    },
+    footnote_reference: {
+      open: "[^",
+      close: "]",
+      authorable: false,
+    },
+  },
+  container_spelling: {
+    block_quote: {
+      marker: "> ",
+      cont: "> ",
+      blank: ">",
+    },
+    bullet_list: {
+      marker: "- ",
+      cont: "  ",
+      blank: "",
+    },
+    ordered_list: {
+      marker: "",
+      cont: "",
+      blank: "",
+      numbered: true,
+    },
+  },
+  attr_spelling: {
+    open: "{",
+    close: "}",
+    quoting: "always",
+    id_sigil: "#",
+    class_sigil: ".",
+  },
+  heading_marker: "#",
+  heading_continues: true,
+  thematic_break: "* * *",
+  code_fence: {
+    char: "`",
+  },
+  task_marker: {
+    unchecked: "[ ]",
+    checked: "[X]",
+  },
+  footnote: {
+    ref_open: "[^",
+    ref_close: "]",
+    def_suffix: ": ",
+  },
+  table_spelling: {
+    bar: "|",
+    delim_pad: "",
+    delim: {
+      default: "---",
+      left: ":--",
+      right: "--:",
+      center: ":-:",
+    },
+  },
+  block_separator: "\n",
+  line_join: "\n",
+  link_text_escapes: "\\[]*_^`~\"'-.:{}",
+  link_dest_escapes: {
+    plain: "\\()[`",
+  },
+  text_escapes: "\\[]*_^`~\"'-.:{}=+<",
+  block_start_escapes: "#>|",
+  names_leaf_containers: true,
+  block_attrs: "native",
+  inline_attrs: true,
+  renderers: ["render_block", "spells_autolink"],
+};
+
 export default {
   name: "djot",
   extensions: ["dj", "djot"],
-  caps: { read: true, write: true, author: false },
+  caps: { read: true, write: true, author: true },
+  syntax: SYNTAX,
   samples: SAMPLES,
   parse(_call, input) {
     return djotTable(input);
   },
   print(_call, t) {
     return renderDjot(djotAst(t));
+  },
+  render(_call, request) {
+    switch (request.which) {
+      case "render_block":
+        return renderDjot(djotAst(request.table));
+      case "spells_autolink": {
+        // Whether djot.js reads `<…>` as a URL or an email and nothing else.
+        const blocks = parseDjot(request.text).children;
+        const only = blocks.length === 1 && blocks[0].tag === "para" && blocks[0].children;
+        return !!only && only.length === 1 && (only[0].tag === "url" || only[0].tag === "email");
+      }
+      default:
+        throw new Error(`djot names no renderer ${request.which}`);
+    }
   },
 };
 
@@ -752,6 +914,9 @@ export function djotAst(t) {
         const cls = r.name ? { class: r.name } : undefined;
         const merged = cls || attributes ? { ...(cls ?? {}), ...(attributes ?? {}) } : undefined;
         if (cls && attributes?.class) merged.class = `${r.name} ${attributes.class}`;
+        // Its form says which it is, where it has one; a container with
+        // none is what the place it stands in holds.
+        if (r.form) inline = r.form.startsWith("inline");
         if (!inline && insideDiv) {
           // renderDjot fences every div with `:::`, so a div inside another
           // would close it; refused rather than written wrong.
