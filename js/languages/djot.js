@@ -117,7 +117,7 @@ export function djotTable(input) {
   const maxoffset = input.charCodeAt(n - 1) === 10 ? n - 1 : n;
   const finalClosers = new Set();
   for (let i = events.length - 1; i >= 0 && events[i].annot[0] === "-"; i--) {
-    finalClosers.add(events[i].annot.split("|")[0]);
+    finalClosers.add(annotation(events[i]));
   }
   const atEnd = (p, closer) => p > maxoffset || (p === maxoffset && finalClosers.has(closer));
   const linesBefore = (p, closer) => (atEnd(p, closer) ? starts.length : lineOf(p));
@@ -143,10 +143,11 @@ export function djotTable(input) {
   const opened = new Map();
   {
     let pending = []; // the `{…}` spans of the block attributes waiting
-    let stack = []; // open attribute blocks: { start, filled }
+    const stack = []; // open attribute blocks: their `{`, whether they carry
+    // anything, and where their last event ended
     for (let i = 0; i < events.length; i++) {
       const e = events[i];
-      const a = e.annot.split("|")[0];
+      const a = annotation(e);
       if (a === "blankline") pending = [];
       if (a === "+block_attributes" || a === "+attributes") {
         stack.push({ start: e.startpos, filled: false, last: e.startpos });
@@ -188,7 +189,7 @@ export function djotTable(input) {
     if (i === undefined) return null;
     let depth = 0;
     for (let j = i + 1; j < events.length; j++) {
-      const a = events[j].annot.split("|")[0];
+      const a = annotation(events[j]);
       if (a === open) depth++;
       else if (a === close) {
         if (depth === 0) return { open: events[i], close: events[j], inside: events.slice(i + 1, j) };
@@ -220,17 +221,15 @@ export function djotTable(input) {
     while (k >= 0 && input[k] === ch) k--;
     return e - k >= len && lineOf(k + 1) > lineOf(s);
   }
-  const attrsOf = (node, keep) => {
+  // A node's attributes, the ones written and then the one djot.js made (a
+  // heading's identifier), as twig's `attrs`.
+  const attrsOf = (node) => {
     const out = [];
-    const add = (obj) => {
-      if (!obj) return;
-      for (const key in obj) if (keep(key)) out.push({ key, value: obj[key] });
-    };
-    add(node.attributes);
-    add(node.autoAttributes);
+    for (const obj of [node.attributes, node.autoAttributes]) {
+      if (obj) for (const key in obj) out.push({ key, value: obj[key] });
+    }
     return out.length ? out : null;
   };
-  const all = () => true;
   // The `{…}` an inline node's attributes came from: the blocks written
   // straight after it, the first one alone when it is the only one that
   // carried anything.
@@ -288,7 +287,7 @@ export function djotTable(input) {
         const whole = span(startOf(k), endOf(next) + 1);
         ids.push(t.row("str", parent, { span: whole, text: k.text }));
         ids.push(t.row("str", parent, {
-          span: whole, text: next.text, attrs: attrsOf(next, all), attrs_span: inlineOrigin(endOf(next)),
+          span: whole, text: next.text, attrs: attrsOf(next), attrs_span: inlineOrigin(endOf(next)),
         }));
         i++;
         continue;
@@ -325,7 +324,7 @@ export function djotTable(input) {
         const explicit = node.attributes && Object.keys(node.attributes).length > 0;
         row("section", {
           span: [B.at(s), B.at(s)],
-          attrs: attrsOf(node, all),
+          attrs: attrsOf(node),
           attrs_span: explicit ? blockAttrsSpan(s) : null,
         });
         const r = t.nodes[id];
@@ -334,12 +333,6 @@ export function djotTable(input) {
         // open at the end of the input runs to the end.
         if (cs) r.content_span = cs;
         r.span = [r.span[0], openAtEnd.has(node) ? B.length : cs ? cs[1] : r.span[0]];
-        // Attributes after the content columns, as twig writes them.
-        const { attrs, attrs_span } = r;
-        delete r.attrs;
-        delete r.attrs_span;
-        if (attrs) r.attrs = attrs;
-        if (attrs_span) r.attrs_span = attrs_span;
         return id;
       }
       case "heading": {
@@ -352,22 +345,21 @@ export function djotTable(input) {
             return j === s ? s : pastSpaces(j);
           })()),
           level: node.level,
-          attrs: attrsOf(node, all),
+          attrs: attrsOf(node),
           attrs_span: explicit ? blockAttrsSpan(s) : null,
         });
       }
       case "para":
-        return withChildren("para", { span: simple(), attrs: attrsOf(node, all), attrs_span: blockAttrsSpan(s) });
+        return withChildren("para", { span: simple(), attrs: attrsOf(node), attrs_span: blockAttrsSpan(s) });
       case "block_quote": {
         const sp = span(s, contentEnd(e, s, "-block_quote"));
-        let j = s;
-        const m = input[j] === ">" ? pastSpaces(j + 1) : s;
+        const m = input[s] === ">" ? pastSpaces(s + 1) : s;
         return prefixed("block_quote", sp, {
-          marker_span: marker(s, m), attrs: attrsOf(node, all), attrs_span: blockAttrsSpan(s),
+          marker_span: marker(s, m), attrs: attrsOf(node), attrs_span: blockAttrsSpan(s),
         });
       }
       case "thematic_break":
-        return row("thematic_break", { span: simple(), attrs: attrsOf(node, all), attrs_span: blockAttrsSpan(s) });
+        return row("thematic_break", { span: simple(), attrs: attrsOf(node), attrs_span: blockAttrsSpan(s) });
       case "bullet_list":
       case "ordered_list":
       case "task_list":
@@ -386,7 +378,7 @@ export function djotTable(input) {
         } else if (tag === "task_list") {
           fields.tight = node.tight;
         }
-        fields.attrs = attrsOf(node, all);
+        fields.attrs = attrsOf(node);
         fields.attrs_span = blockAttrsSpan(s);
         return withChildren(tag, fields);
       }
@@ -396,12 +388,12 @@ export function djotTable(input) {
         const task = tag === "task_list_item";
         const fields = { marker_span: marker(s, listMarkerEnd(s, task)) };
         if (task) fields.checked = node.checkbox === "checked";
-        fields.attrs = attrsOf(node, all);
+        fields.attrs = attrsOf(node);
         return prefixed(tag, sp, fields);
       }
       case "definition_list_item": {
         const sp = span(s, contentEnd(e + 1, s));
-        row("definition_list_item", { span: sp, content_span: sp, attrs: attrsOf(node, all) });
+        row("definition_list_item", { span: sp, content_span: sp, attrs: attrsOf(node) });
         const item = id;
         const [term, definition] = node.children;
         const termId = t.row("term", item, { span: sp });
@@ -421,7 +413,7 @@ export function djotTable(input) {
         const fields = tag === "code_block"
           ? { lang: node.lang ?? null, text: node.text }
           : { format: node.format, text: node.text };
-        return row(tag, { span: sp, content_span: cs, ...fields, attrs: attrsOf(node, all), attrs_span: blockAttrsSpan(s) });
+        return row(tag, { span: sp, content_span: cs, ...fields, attrs: attrsOf(node), attrs_span: blockAttrsSpan(s) });
       }
       case "div": {
         const closed = fenceClosed(node);
@@ -432,7 +424,7 @@ export function djotTable(input) {
           name: "",
           form: "block_fenced",
           argument: null,
-          attrs: attrsOf(node, all),
+          attrs: attrsOf(node),
           attrs_span: blockAttrsSpan(s),
         });
         const r = t.nodes[id];
@@ -442,7 +434,7 @@ export function djotTable(input) {
       }
       case "table": {
         const sp = span(s, contentEnd(e, s, "-table"));
-        row("table", { span: sp, attrs: attrsOf(node, all), attrs_span: blockAttrsSpan(s) });
+        row("table", { span: sp, attrs: attrsOf(node), attrs_span: blockAttrsSpan(s) });
         const tbl = id;
         const [caption, ...rows] = node.children;
         const ids = [];
@@ -450,7 +442,7 @@ export function djotTable(input) {
           const cs0 = startOf(caption);
           const capId = t.row("caption", tbl, {
             span: span(cs0, contentEnd(endOf(caption) + 1, cs0)),
-            attrs: attrsOf(caption, all),
+            attrs: attrsOf(caption),
           });
           const cc = fromChildren(walkChildren(caption, capId));
           if (cc) t.nodes[capId].content_span = cc;
@@ -471,25 +463,23 @@ export function djotTable(input) {
         return tbl;
       }
       case "row":
-        return withChildren("row", { span: simple(), head: node.head, attrs: attrsOf(node, all) });
+        return withChildren("row", { span: simple(), head: node.head, attrs: attrsOf(node) });
       case "cell":
         return withChildren("cell", {
-          span: simple(), head: node.head, alignment: node.align, colspan: 1, rowspan: 1, attrs: attrsOf(node, all),
+          span: simple(), head: node.head, alignment: node.align, colspan: 1, rowspan: 1, attrs: attrsOf(node),
         });
-      case "caption":
-        return withChildren("caption", { span: simple() });
 
       // ── inlines ──
       case "str":
-        return row("str", { span: simple(), text: node.text, attrs: attrsOf(node, all), attrs_span: node.attributes ? inlineOrigin(e) : null });
+        return row("str", { span: simple(), text: node.text, attrs: attrsOf(node), attrs_span: node.attributes ? inlineOrigin(e) : null });
       case "soft_break":
       case "hard_break":
       case "non_breaking_space":
-        return row(tag, { span: simple(), attrs: attrsOf(node, all), attrs_span: node.attributes ? inlineOrigin(e) : null });
+        return row(tag, { span: simple(), attrs: attrsOf(node), attrs_span: node.attributes ? inlineOrigin(e) : null });
       case "smart_punctuation":
         return row("smart_punctuation", {
           span: simple(), punctuation_kind: node.type, text: node.text,
-          attrs: attrsOf(node, all), attrs_span: node.attributes ? inlineOrigin(e) : null,
+          attrs: attrsOf(node), attrs_span: node.attributes ? inlineOrigin(e) : null,
         });
       case "span":
         return withChildren("container", {
@@ -498,7 +488,7 @@ export function djotTable(input) {
           name: "",
           form: "inline_text",
           argument: null,
-          attrs: attrsOf(node, all),
+          attrs: attrsOf(node),
           attrs_span: node.attributes ? inlineOrigin(e) : null,
         });
       case "link":
@@ -507,7 +497,7 @@ export function djotTable(input) {
           span: span(tag === "image" ? s - 1 : s, e + 1),
           destination: node.destination ?? null,
           reference: node.reference ?? null,
-          attrs: attrsOf(node, all),
+          attrs: attrsOf(node),
           attrs_span: node.attributes ? inlineOrigin(e) : null,
         });
       case "verbatim":
@@ -523,22 +513,22 @@ export function djotTable(input) {
         const fields = tag === "raw_inline" ? { format: node.format, text: node.text } : { text: node.text };
         return row(tag, {
           span: simple(), content_span: cs, ...fields,
-          attrs: attrsOf(node, all), attrs_span: node.attributes ? inlineOrigin(e) : null,
+          attrs: attrsOf(node), attrs_span: node.attributes ? inlineOrigin(e) : null,
         });
       }
       case "symb":
         return row("symb", {
           span: simple(), content_span: marker(s + 1, e), text: node.alias,
-          attrs: attrsOf(node, all), attrs_span: node.attributes ? inlineOrigin(e) : null,
+          attrs: attrsOf(node), attrs_span: node.attributes ? inlineOrigin(e) : null,
         });
       case "footnote_reference":
         return row("footnote_reference", {
           span: simple(), content_span: marker(s + 2, e), text: node.text,
-          attrs: attrsOf(node, all), attrs_span: node.attributes ? inlineOrigin(e) : null,
+          attrs: attrsOf(node), attrs_span: node.attributes ? inlineOrigin(e) : null,
         });
       default:
         if (MARKS.has(tag)) {
-          return withChildren(tag, { span: simple(), attrs: attrsOf(node, all), attrs_span: node.attributes ? inlineOrigin(e) : null });
+          return withChildren(tag, { span: simple(), attrs: attrsOf(node), attrs_span: node.attributes ? inlineOrigin(e) : null });
         }
         throw new Error(`djot.js produced a node twig has no row for: ${tag}`);
     }
@@ -556,7 +546,7 @@ export function djotTable(input) {
   markCodeLines(ast);
   for (const k of Object.values(ast.footnotes)) markCodeLines(k);
 
-  const root = t.row("doc", null, { span: [0, B.length], attrs: attrsOf(ast, all) });
+  const root = t.row("doc", null, { span: [0, B.length], attrs: attrsOf(ast) });
   const cs = fromChildren(walkChildren(ast, root));
   if (cs) t.nodes[root].content_span = cs;
 
@@ -602,18 +592,24 @@ export function djotTable(input) {
       const s = startOf(r);
       t.row("reference", null, {
         span: span(s, contentEnd(endOf(r), s, "-reference_definition")), label: r.label, destination: r.destination,
-        attrs: attrsOf(r, all), attrs_span: blockAttrsSpan(s),
+        attrs: attrsOf(r), attrs_span: blockAttrsSpan(s),
       });
     } else {
       const s = startOf(r);
       const sp = span(s, contentEnd(endOf(r), s, "-footnote"));
       const fid = t.row("footnote", null, {
-        span: sp, content_span: sp, label: r.label, attrs: attrsOf(r, all), attrs_span: blockAttrsSpan(s),
+        span: sp, content_span: sp, label: r.label, attrs: attrsOf(r), attrs_span: blockAttrsSpan(s),
       });
       walkChildren(r, fid);
     }
   }
   return { nodes: t.nodes, labels };
+}
+
+/** An event's annotation without the list styles djot.js puts after a `|`. */
+function annotation(e) {
+  const bar = e.annot.indexOf("|");
+  return bar < 0 ? e.annot : e.annot.slice(0, bar);
 }
 
 function normalizeLabel(label) {
