@@ -86,9 +86,9 @@ a quote or a link a gesture builds, by printing it as a document is printed.
 The gestures write what they write over the compiled djot (`tests/twins.rs`
 holds a toolbar's worth to the same bytes). The price is at registration:
 twig's load check drives every gesture over every sample through the module,
-some thousands of calls, which is about two seconds in a release build — paid
-by every `twig` command that loads the helper, and once by a program that
-registers it.
+some thousands of calls: about two seconds for a program that registers it
+in-process, and about four for every `twig` command that loads it as a helper,
+where each call is a round trip over the wire.
 
 ## Install
 
