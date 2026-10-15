@@ -12,12 +12,11 @@ keywords = ["twig", "djot", "javascript", "quickjs", "parser"]
 categories = ["parser-implementations", "text-processing", "command-line-utilities"]
 publish = true
 
-# `xtask` is twig-quickjs's CI, as a program, as it is in fig-quickjs: `cargo
-# xtask <job>` runs one CI job and the workflow runs nothing else.
+# A workspace of one package, kept for `[workspace.package]` below. CI is not a
+# crate here: it is the jobs in .config/ship.figl, run by `ship ci`.
 [workspace]
-members = ["xtask"]
 
-# One `version = "…"` line for the whole repository, which is what `release bump`
+# One `version = "…"` line for the whole repository, which is what `ship bump`
 # rewrites and what the package inherits.
 [workspace.package]
 version = "0.1.0"
